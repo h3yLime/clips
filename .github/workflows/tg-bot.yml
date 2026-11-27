@@ -1,0 +1,37 @@
+name: tg-bot
+# Бот ТГ-канала: кнопки и очередь. Код в tgbot/, состояние в отдельной ветке `state`,
+# чтобы чистка роликов (gh_clean.ps1, force-push main) его не задевала.
+on:
+  schedule:
+    - cron: "7,47 * * * *"   # примерно раз в 40 минут (Паша, 24.11)
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: tg-bot
+  cancel-in-progress: false
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: tgbot
+          fetch-depth: 1
+      - name: load state
+        run: |
+          git fetch -q --depth 1 origin state 2>/dev/null && git show FETCH_HEAD:state.json > tgbot/state.json || echo "no state yet"
+          cp tgbot/state.json /tmp/old.json 2>/dev/null || echo "{}" > /tmp/old.json
+      - run: python3 tgbot/bot.py
+        env:
+          TG_TOKEN: ${{ secrets.TG_TOKEN }}
+          TG_CHAT: ${{ secrets.TG_CHAT }}
+      - name: save state
+        run: |
+          cmp -s tgbot/state.json /tmp/old.json && exit 0
+          cp tgbot/state.json /tmp/new.json
+          cd /tmp && rm -rf st && mkdir st && cd st && git init -q && cp /tmp/new.json state.json
+          git add state.json
+          git -c user.name=tg-bot -c user.email=tg-bot@users.noreply.github.com commit -q -m state
+          git push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" HEAD:state
